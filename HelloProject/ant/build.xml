@@ -1,0 +1,186 @@
+<?xml version="1.0"?>
+
+<project xmlns:ivy="antlib:org.apache.ivy.ant" name="HelloProject" default="war" basedir="..">
+	<property file="ant/build.properties" />
+	<property name="builder" value="HelloProject" />
+	<property name="ivy.jar.dir" value="${basedir}/ivy" />
+	<property name="lib.dir" value="${basedir}/WebContent/WEB-INF/lib" />
+
+	<path id="compile.classpath">
+		<fileset dir="${lib.dir}">
+			<include name="*.jar" />
+		</fileset>
+	</path>
+
+	<target name="install-ivy" description="--> install ivy">
+		<!-- try to load ivy here from local ivy dir, in case the user has not already dropped
+	    	      it into ant's lib dir (note that the latter copy will always take precedence).
+	    	      We will not fail as long as local lib dir exists (it may be empty) and
+	    	      ivy is in at least one of ant's lib dir or the local lib dir. -->
+		<path id="ivy.lib.path">
+			<fileset dir="${ivy.jar.dir}" includes="*.jar" />
+		</path>
+		<taskdef resource="org/apache/ivy/ant/antlib.xml" uri="antlib:org.apache.ivy.ant" classpathref="ivy.lib.path" />
+	</target>
+
+	<target name="resolve" depends="install-ivy" description="--> retrieve dependencies with ivy">
+		<delete dir="WebContent/WEB-INF/lib" />
+		<ivy:retrieve type="jar, bundle" pattern="${lib.dir}/[artifact]-[type]-[revision].[ext]" />
+	</target>
+
+	<target name="report" depends="resolve" description="--> generates a report of dependencies">
+		<ivy:report todir="${basedir}/build" />
+	</target>
+
+	<target name="init" depends="clean">
+		<mkdir dir="build/classes" />
+		<mkdir dir="build/tests" />
+		<mkdir dir="build/instr" />
+		<mkdir dir="dist" />
+		<mkdir dir="emma" />
+		<mkdir dir="coverage" />
+	</target>
+
+	<target name="clean">
+		<delete dir="dist" />
+		<delete dir="build" />
+		<delete dir="coverage" />
+	</target>
+
+	<property name="emma.dir" value="emma" />
+
+	<path id="emma.lib">
+		<pathelement location="${emma.dir}/emma.jar" />
+		<pathelement location="${emma.dir}/emma_ant.jar" />
+	</path>
+
+	<property name="coverage.dir" value="${basedir}/coverage" />
+	<property name="instr.dir" value="build/instr" />
+
+	<path id="emma.coverage.classes">
+		<pathelement location="build/classes/" />
+	</path>
+
+	<taskdef resource="emma_ant.properties" classpathref="emma.lib" />
+
+	<target name="emma" description="turns on EMMA instrumentation/reporting">
+		<property name="emma.enabled" value="true" />
+		<!-- EMMA instr class output directory: -->
+		<mkdir dir="${instr.dir}" />
+	</target>
+
+	<target name="compile" depends="init">
+		<javac destdir="build/classes" debug="true" srcdir="src">
+			<classpath refid="compile.classpath" />
+		</javac>
+		<javac destdir="build/tests" debug="true" srcdir="test">
+			<classpath>
+				<path refid="compile.classpath">
+				</path>
+				<path location="build/classes">
+				</path>
+			</classpath>
+		</javac>
+		<copy file="src/hibernate.cfg.xml" todir="build/classes">
+		</copy>
+		<copy file="log4j.properties" todir="build/classes">
+		</copy>
+	</target>
+
+	<target name="war" depends="compile">
+		<war destfile="dist/HelloProject.war" webxml="WebContent/WEB-INF/web.xml">
+			<fileset dir="WebContent" />
+			<classes dir="build/classes" />
+			<manifest>
+				<attribute name="Built-By" value="${builder}" />
+			</manifest>
+		</war>
+	</target>
+
+	<target name="deploy" depends="war">
+		<copy file="dist/HelloProject.war" todir="/home/aelagon/apache-tomcat-8.0.5/webapps" />
+	</target>
+
+
+	<target name="junit" depends="compile">
+
+		<emma enabled="true">
+			<instr instrpathref="emma.coverage.classes" destdir="${instr.dir}" metadatafile="${coverage.dir}/metadata.emma" merge="false" />
+		</emma>
+		<junit fork="true" printsummary="yes" haltonfailure="yes">
+			<classpath>
+				<pathelement location="${instr.dir}" />
+				<path refid="compile.classpath" />
+				<path location="build/tests" />
+				<path refid="emma.coverage.classes" />
+				<path refid="emma.lib" />
+			</classpath>
+
+			<formatter type="plain" />
+			<formatter type="xml" />
+
+			<batchtest fork="yes" todir="reports">
+				<fileset dir="test">
+					<include name="**/test*.java" />
+				</fileset>
+			</batchtest>
+
+			<jvmarg value="-XX:-UseSplitVerifier" />
+			<jvmarg value="-Demma.coverage.out.file=${coverage.dir}/coverage.emma" />
+			<jvmarg value="-Demma.coverage.out.merge=true" />
+
+		</junit>
+
+		<emma enabled="true">
+			<report sourcepath="${src.dir}" depth="method">
+				<fileset dir="${coverage.dir}">
+					<include name="*.emma" />
+				</fileset>
+
+				<txt outfile="${coverage.dir}/coverage.txt" />
+				<html outfile="${coverage.dir}/coverage.html" />
+			</report>
+		</emma>
+	</target>
+
+	<path id="catalina-ant-classpath">
+		<!-- We need the Catalina jars for Tomcat -->
+		<!--  * for other app servers - check the docs -->
+		<fileset dir="${server.home}/lib">
+			<include name="*.jar" />
+		</fileset>
+	</path>
+
+	<taskdef name="reload" classname="org.apache.catalina.ant.ReloadTask">
+		<classpath refid="catalina-ant-classpath" />
+	</taskdef>
+	<taskdef name="start" classname="org.apache.catalina.ant.StartTask">
+		<classpath refid="catalina-ant-classpath" />
+	</taskdef>
+	<taskdef name="stop" classname="org.apache.catalina.ant.StopTask">
+		<classpath refid="catalina-ant-classpath" />
+	</taskdef>
+
+	<target name="reload" description="Reload application in Tomcat">
+		<reload url="${tomcat.manager.url}" username="${tomcat.username}" password="${tomcat.password}" path="/${webapp.name}" />
+	</target>
+
+	<target name="start" description="Start Tomcat application">
+		<start url="${tomcat.manager.url}/html" username="${tomcat.username}" password="${tomcat.password}" path="${webapp.name}" />
+	</target>
+
+	<target name="stop" description="Stop Tomcat application">
+		<stop url="${tomcat.manager.url}" username="${tomcat.username}" password="${tomcat.password}" path="/${webapp.name}" />
+	</target>
+
+	<target name="startServer" description="Start Tomcat Server">
+		<exec executable="${server.home}/bin/startup.sh" />
+	</target>
+	<target name="stopServer" description="Stop Tomcat Server">
+		<exec executable="${server.home}/bin/shutdown.sh" />
+	</target>
+	<target name="restartServer" description="Restart Tomcat Server">
+		<exec executable="${server.home}/bin/shutdown.sh" />
+		<exec executable="${server.home}/bin/startup.sh" />
+	</target>
+</project>
