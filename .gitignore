@@ -1,0 +1,15 @@
+# ignore all bin directories
+# matches "bin" in any subfolder
+bin/
+dist/
+
+# ignore all target directories
+build/
+target/
+coverage/
+reports/
+
+# ignore all files ending with ~
+*~ 
+*.jar
+
